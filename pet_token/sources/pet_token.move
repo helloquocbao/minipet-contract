@@ -9,9 +9,9 @@ module pet_token::pet_token {
         let (treasury, metadata) = coin::create_currency(
             witness,
             9,                  // decimals
-            b"MMOT",            // symbol
-            b"Mini Monter",     // name
-            b"Focus to earn MMOT and grow your monsters!", // description
+            b"MIPET",           // symbol
+            b"MiniPet",         // name
+            b"The official currency of MiniPet ecosystem. Focus, grow, and trade!", // description
             option::none(),     // icon_url
             ctx
         );
