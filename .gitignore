@@ -1,0 +1,9 @@
+# Build artifacts
+build/
+
+# Move dependencies
+.move/
+
+# OS files
+.DS_Store
+Thumbs.db
