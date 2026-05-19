@@ -1,7 +1,8 @@
 #[allow(lint(public_entry))]
 module pet_nft::pet_nft {
     use std::string::{Self, String};
-    use sui::object::{Self, UID};
+    use std::vector;
+    use sui::object::{Self, UID, ID};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
     use sui::clock::{Self, Clock};
@@ -25,6 +26,7 @@ module pet_nft::pet_nft {
         custom_mint_count: u64,
         base_slot_fee: u64,     // Phí cố định cho 1 slot
         treasury_address: address, // Địa chỉ nhận phí tập trung
+        templates: vector<ID>, // Danh sách các ID của PetTemplate
     }
 
     /// Vật phẩm cho phép đúc Pet (Cần mua trước khi mint)
@@ -91,10 +93,11 @@ module pet_nft::pet_nft {
 
         let global_config = GlobalConfig {
             id: object::new(ctx),
-            custom_mint_limit: 100, 
+            custom_mint_limit: 10, 
             custom_mint_count: 0,
             base_slot_fee: 10000 * 1000000000,   // 10,000 MIPET cố định
             treasury_address: tx_context::sender(ctx), // Mặc định là người deploy
+            templates: vector::empty<ID>(),
         };
         
         let admin_cap = AdminCap { id: object::new(ctx) };
@@ -184,7 +187,17 @@ module pet_nft::pet_nft {
     }
 
     /// Admin tạo mẫu Pet mới để bán
-    public fun create_template(_: &AdminCap, name: vector<u8>, img: vector<u8>, img_blob: ID, sprite: vector<u8>, sprite_blob: ID, price: u64, ctx: &mut TxContext) {
+    public fun create_template(
+        _: &AdminCap,
+        config: &mut GlobalConfig,
+        name: vector<u8>,
+        img: vector<u8>,
+        img_blob: ID,
+        sprite: vector<u8>,
+        sprite_blob: ID,
+        price: u64,
+        ctx: &mut TxContext
+    ) {
         let template = PetTemplate {
             id: object::new(ctx),
             name: string::utf8(name),
@@ -194,6 +207,8 @@ module pet_nft::pet_nft {
             sprite_blob_id: sprite_blob,
             price,
         };
+        let template_id = object::id(&template);
+        vector::push_back(&mut config.templates, template_id);
         transfer::public_share_object(template);
     }
 
