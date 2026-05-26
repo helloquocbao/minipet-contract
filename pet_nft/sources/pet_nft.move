@@ -1,4 +1,4 @@
-#[allow(lint(public_entry))]
+#[allow(lint(public_entry), duplicate_alias, unused_use, unused_const, unused_field, lint(public_random), deprecated_usage)]
 module pet_nft::pet_nft {
     use std::string::{Self, String};
     use std::vector;
@@ -46,6 +46,7 @@ module pet_nft::pet_nft {
         sprite_blob_id: ID,  // Sui Object ID of the storage reservation
         slug: String,
         level: u64,
+        experience: u64,
         happiness: u64,
         born_at: u64,
         perfection_score: u64,
@@ -178,6 +179,7 @@ module pet_nft::pet_nft {
             sprite_blob_id,
             slug: string::utf8(slug),
             level: 1,
+            experience: 0,
             happiness: 100,
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection,
@@ -233,6 +235,7 @@ module pet_nft::pet_nft {
             sprite_blob_id: template.sprite_blob_id,
             slug: template.name, 
             level: 1, 
+            experience: 0,
             happiness: 100, 
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection, 
@@ -262,6 +265,11 @@ module pet_nft::pet_nft {
     }
 
     public fun perfection_score(pet: &PetNFT): u64 { pet.perfection_score }
+    public fun level(pet: &PetNFT): u64 { pet.level }
+    public fun experience(pet: &PetNFT): u64 { pet.experience }
+    public fun happiness(pet: &PetNFT): u64 { pet.happiness }
+    public fun born_at(pet: &PetNFT): u64 { pet.born_at }
+    
     public fun level_up(pet: &mut PetNFT) { pet.level = pet.level + 1; }
     public fun update_happiness(pet: &mut PetNFT, amount: u64) { assert!(amount <= 100, EMaxHappiness); pet.happiness = amount; }
     public fun burn(pet: PetNFT) {
@@ -274,6 +282,7 @@ module pet_nft::pet_nft {
             sprite_blob_id: _, 
             slug: _, 
             level: _, 
+            experience: _,
             happiness: _, 
             born_at: _, 
             perfection_score: _, 
@@ -282,13 +291,36 @@ module pet_nft::pet_nft {
         object::delete(id);
     }
     
-    public entry fun send_message(pet: &PetNFT, payment: Coin<SUI>, recipient: address, message: vector<u8>, ctx: &mut TxContext) {
-        let amount = coin::value(&payment); transfer::public_transfer(payment, recipient);
+    public entry fun send_message(config: &GlobalConfig, pet: &mut PetNFT, payment: &mut Coin<SUI>, recipient: address, message: vector<u8>, ctx: &mut TxContext) {
+        let amount = coin::value(payment); 
+        let fee_amount = amount / 100; // 1% fee
+        
+        if (fee_amount > 0) {
+            let fee_coin = coin::split(payment, fee_amount, ctx);
+            transfer::public_transfer(fee_coin, config.treasury_address);
+        };
+        
+        let sent_amount = coin::value(payment);
+        let sent_coin = coin::split(payment, sent_amount, ctx);
+        transfer::public_transfer(sent_coin, recipient);
+        
+        // Tính kinh nghiệm: 1 SUI (10^9 MIST) = 100 EXP -> 1 EXP = 10,000,000 MIST (0.01 SUI).
+        // EXP dựa trên tổng amount gốc để khuyến khích
+        let exp_gained = amount / 10000000;
+        if (exp_gained > 0) {
+            pet.experience = pet.experience + exp_gained;
+            // Vòng lặp thăng cấp (Cần level * 100 EXP)
+            while (pet.experience >= pet.level * 100) {
+                pet.experience = pet.experience - pet.level * 100;
+                pet.level = pet.level + 1;
+            };
+        };
+
         event::emit(MessageEvent { sender: tx_context::sender(ctx), recipient, amount, message: string::utf8(message), pet_slug: pet.name, pet_image: pet.image_url });
     }
     public entry fun bonk_pet(
         config: &GlobalConfig,
-        my_pet: &PetNFT, 
+        my_pet: &mut PetNFT, 
         payment: &mut Coin<PET_TOKEN>, 
         target: address, 
         ctx: &mut TxContext
@@ -296,6 +328,15 @@ module pet_nft::pet_nft {
         let fee = 100 * 1000000000; 
         let fee_coin = coin::split(payment, fee, ctx); 
         transfer::public_transfer(fee_coin, config.treasury_address);
+        
+        // Gõ đầu nhận cố định 50 EXP
+        let exp_gained = 50;
+        my_pet.experience = my_pet.experience + exp_gained;
+        while (my_pet.experience >= my_pet.level * 100) {
+            my_pet.experience = my_pet.experience - my_pet.level * 100;
+            my_pet.level = my_pet.level + 1;
+        };
+
         event::emit(BonkEvent { bonker: tx_context::sender(ctx), target, fee, pet_slug: my_pet.name, pet_image: my_pet.image_url });
     }
 

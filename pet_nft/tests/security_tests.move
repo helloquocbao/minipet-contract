@@ -95,16 +95,22 @@ module pet_nft::security_tests {
         // 2. Create template
         test_scenario::next_tx(scenario, admin);
         {
+            let mut config = test_scenario::take_shared<GlobalConfig>(scenario);
             let admin_cap = test_scenario::take_from_sender<AdminCap>(scenario);
+            let dummy_id = sui::object::id(&admin_cap);
             pet_nft::create_template(
                 &admin_cap,
+                &mut config,
                 b"TestPet",
                 b"img",
+                dummy_id,
                 b"sprite",
+                dummy_id,
                 1000,
                 test_scenario::ctx(scenario)
             );
             test_scenario::return_to_sender(scenario, admin_cap);
+            test_scenario::return_shared(config);
         };
         
         // 3. User buys pet
