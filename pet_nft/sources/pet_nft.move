@@ -25,9 +25,11 @@ module pet_nft::pet_nft {
         custom_mint_limit: u64,
         custom_mint_count: u64,
         base_slot_fee: u64,     // Phí cố định cho 1 slot
+        rename_fee: u64,        // Phí đổi tên Pet
         treasury_address: address, // Địa chỉ nhận phí tập trung
         templates: vector<ID>, // Danh sách các ID của PetTemplate
     }
+
 
     /// Vật phẩm cho phép đúc Pet (Cần mua trước khi mint)
     public struct MintSlot has key, store {
@@ -97,9 +99,11 @@ module pet_nft::pet_nft {
             custom_mint_limit: 10, 
             custom_mint_count: 0,
             base_slot_fee: 10000 * 1000000000,   // 10,000 MIPET cố định
+            rename_fee: 50 * 1000000000,         // 50 MIPET mặc định để đổi tên
             treasury_address: tx_context::sender(ctx), // Mặc định là người deploy
             templates: vector::empty<ID>(),
         };
+
         
         let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::public_transfer(publisher, tx_context::sender(ctx));
@@ -130,6 +134,12 @@ module pet_nft::pet_nft {
     public fun increase_mint_limit(_: &AdminCap, config: &mut GlobalConfig, amount: u64) {
         config.custom_mint_limit = config.custom_mint_limit + amount;
     }
+
+    /// Admin điều chỉnh phí đổi tên
+    public fun update_rename_fee(_: &AdminCap, config: &mut GlobalConfig, new_fee: u64) {
+        config.rename_fee = new_fee;
+    }
+
 
     /// MUA SLOT ĐÚC (Giá cố định)
     public entry fun buy_mint_slot(
@@ -270,8 +280,29 @@ module pet_nft::pet_nft {
     public fun happiness(pet: &PetNFT): u64 { pet.happiness }
     public fun born_at(pet: &PetNFT): u64 { pet.born_at }
     
-    public fun level_up(pet: &mut PetNFT) { pet.level = pet.level + 1; }
+    /// Users share their current mood with the pet.
+    /// The amount corresponds to the user's selected mood (e.g., happy = high, sad = low).
     public fun update_happiness(pet: &mut PetNFT, amount: u64) { assert!(amount <= 100, EMaxHappiness); pet.happiness = amount; }
+
+    /// Rename the pet by paying the rename fee in PET_TOKEN.
+    public entry fun rename_pet(
+        config: &GlobalConfig,
+        pet: &mut PetNFT,
+        payment: &mut Coin<PET_TOKEN>,
+        new_name: vector<u8>,
+        ctx: &mut TxContext
+    ) {
+        let fee = config.rename_fee;
+        assert!(coin::value(payment) >= fee, EInsufficientFunds);
+        
+        let fee_coin = coin::split(payment, fee, ctx);
+        transfer::public_transfer(fee_coin, config.treasury_address);
+        
+        pet.name = string::utf8(new_name);
+    }
+
+
+
     public fun burn(pet: PetNFT) {
         let PetNFT { 
             id, 
