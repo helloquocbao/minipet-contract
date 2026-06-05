@@ -53,6 +53,7 @@ module pet_nft::pet_nft {
         born_at: u64,
         perfection_score: u64,
         is_custom: bool,      
+        rarity: String,
     }
 
     /// Template cho các loại Pet tiêu chuẩn (Cửa hàng)
@@ -61,8 +62,14 @@ module pet_nft::pet_nft {
         name: String,
         image_url: String,
         image_blob_id: ID,
-        sprite_url: String,
-        sprite_blob_id: ID,
+        sprite_url_normal: String,
+        sprite_blob_id_normal: ID,
+        sprite_url_rare: String,
+        sprite_blob_id_rare: ID,
+        sprite_url_super_rare: String,
+        sprite_blob_id_super_rare: ID,
+        sprite_url_legendary: String,
+        sprite_blob_id_legendary: ID,
         price: u64,
     }
 
@@ -194,6 +201,7 @@ module pet_nft::pet_nft {
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection,
             is_custom: true,
+            rarity: string::utf8(b"Custom"),
         };
         transfer::public_transfer(pet, tx_context::sender(ctx));
     }
@@ -205,8 +213,14 @@ module pet_nft::pet_nft {
         name: vector<u8>,
         img: vector<u8>,
         img_blob: ID,
-        sprite: vector<u8>,
-        sprite_blob: ID,
+        sprite_normal: vector<u8>,
+        sprite_blob_normal: ID,
+        sprite_rare: vector<u8>,
+        sprite_blob_rare: ID,
+        sprite_super_rare: vector<u8>,
+        sprite_blob_super_rare: ID,
+        sprite_legendary: vector<u8>,
+        sprite_blob_legendary: ID,
         price: u64,
         ctx: &mut TxContext
     ) {
@@ -215,8 +229,14 @@ module pet_nft::pet_nft {
             name: string::utf8(name),
             image_url: string::utf8(img),
             image_blob_id: img_blob,
-            sprite_url: string::utf8(sprite),
-            sprite_blob_id: sprite_blob,
+            sprite_url_normal: string::utf8(sprite_normal),
+            sprite_blob_id_normal: sprite_blob_normal,
+            sprite_url_rare: string::utf8(sprite_rare),
+            sprite_blob_id_rare: sprite_blob_rare,
+            sprite_url_super_rare: string::utf8(sprite_super_rare),
+            sprite_blob_id_super_rare: sprite_blob_super_rare,
+            sprite_url_legendary: string::utf8(sprite_legendary),
+            sprite_blob_id_legendary: sprite_blob_legendary,
             price,
         };
         let template_id = object::id(&template);
@@ -236,13 +256,28 @@ module pet_nft::pet_nft {
         assert!(coin::value(&payment) >= template.price, EInsufficientFunds);
         
         let perfection = roll_perfection_v2(random, ctx);
+        
+        // Secure Randomness roll to determine rarity appearance
+        let mut gen = random::new_generator(random, ctx);
+        let roll = random::generate_u64_in_range(&mut gen, 0, 10000);
+        
+        let (sprite_url, sprite_blob_id, rarity) = if (roll < 7000) {
+            (template.sprite_url_normal, template.sprite_blob_id_normal, string::utf8(b"Normal"))
+        } else if (roll < 9000) {
+            (template.sprite_url_rare, template.sprite_blob_id_rare, string::utf8(b"Rare"))
+        } else if (roll < 9800) {
+            (template.sprite_url_super_rare, template.sprite_blob_id_super_rare, string::utf8(b"Super Rare"))
+        } else {
+            (template.sprite_url_legendary, template.sprite_blob_id_legendary, string::utf8(b"Legendary"))
+        };
+
         let pet = PetNFT {
             id: object::new(ctx), 
             name: template.name, 
             image_url: template.image_url, 
             image_blob_id: template.image_blob_id,
-            sprite_url: template.sprite_url,
-            sprite_blob_id: template.sprite_blob_id,
+            sprite_url,
+            sprite_blob_id,
             slug: template.name, 
             level: 1, 
             experience: 0,
@@ -250,6 +285,7 @@ module pet_nft::pet_nft {
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection, 
             is_custom: false,
+            rarity,
         };
         transfer::public_transfer(payment, config.treasury_address);
         transfer::public_transfer(pet, tx_context::sender(ctx));
@@ -276,6 +312,7 @@ module pet_nft::pet_nft {
 
     public fun perfection_score(pet: &PetNFT): u64 { pet.perfection_score }
     public fun level(pet: &PetNFT): u64 { pet.level }
+    public fun rarity(pet: &PetNFT): String { pet.rarity }
     public fun experience(pet: &PetNFT): u64 { pet.experience }
     public fun happiness(pet: &PetNFT): u64 { pet.happiness }
     public fun born_at(pet: &PetNFT): u64 { pet.born_at }
@@ -317,7 +354,8 @@ module pet_nft::pet_nft {
             happiness: _, 
             born_at: _, 
             perfection_score: _, 
-            is_custom: _ 
+            is_custom: _,
+            rarity: _ 
         } = pet;
         object::delete(id);
     }
