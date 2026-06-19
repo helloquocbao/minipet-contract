@@ -19,38 +19,32 @@ module pet_nft::security_tests {
         let mut scenario_val = test_scenario::begin(admin);
         let scenario = &mut scenario_val;
         
-        // 1. Setup
         test_scenario::next_tx(scenario, admin);
         {
             pet_nft::test_init(test_scenario::ctx(scenario));
             pet_token::test_init(test_scenario::ctx(scenario));
         };
         
-        // 2. Admin sets treasury
         test_scenario::next_tx(scenario, admin);
         {
             let mut config = test_scenario::take_shared<GlobalConfig>(scenario);
             let admin_cap = test_scenario::take_from_sender<AdminCap>(scenario);
-            
             pet_nft::update_treasury(&admin_cap, &mut config, treasury);
-            
             test_scenario::return_to_sender(scenario, admin_cap);
             test_scenario::return_shared(config);
         };
         
-        // 3. User buys mint slot
+        // User buys mint slot
         test_scenario::next_tx(scenario, user);
         {
             let mut config = test_scenario::take_shared<GlobalConfig>(scenario);
             let mut payment = coin::mint_for_testing<PET_TOKEN>(10000 * 1000000000, test_scenario::ctx(scenario));
-            
             pet_nft::buy_mint_slot(&mut config, &mut payment, test_scenario::ctx(scenario));
-            
             test_utils::destroy(payment);
             test_scenario::return_shared(config);
         };
         
-        // 4. Verify treasury received funds
+        // Verify treasury received funds
         test_scenario::next_tx(scenario, treasury);
         {
             let fee_coin = test_scenario::take_from_sender<coin::Coin<PET_TOKEN>>(scenario);
@@ -69,7 +63,6 @@ module pet_nft::security_tests {
         let mut scenario_val = test_scenario::begin(admin);
         let scenario = &mut scenario_val;
         
-        // 1. Setup
         test_scenario::next_tx(scenario, admin);
         {
             pet_nft::test_init(test_scenario::ctx(scenario));
@@ -84,54 +77,55 @@ module pet_nft::security_tests {
         {
             let mut random_state = test_scenario::take_shared<random::Random>(scenario);
             random::update_randomness_state_for_testing(
-                &mut random_state,
-                0,
+                &mut random_state, 0,
                 x"0102030405060708091011121314151617181920212223242526272829303132",
                 test_scenario::ctx(scenario)
             );
             test_scenario::return_shared(random_state);
         };
         
-        // 2. Create template
+        // Create template with multi-rarity sprites
         test_scenario::next_tx(scenario, admin);
         {
+            let mut config = test_scenario::take_shared<GlobalConfig>(scenario);
             let admin_cap = test_scenario::take_from_sender<AdminCap>(scenario);
+            let dummy_id = sui::object::id(&admin_cap);
             pet_nft::create_template(
-                &admin_cap,
-                b"TestPet",
-                b"img",
-                b"sprite",
-                1000,
+                &admin_cap, &mut config,
+                b"TestPet", b"img", dummy_id,
+                b"sprite_normal", dummy_id,
+                b"sprite_rare", dummy_id,
+                b"sprite_sr", dummy_id,
+                b"sprite_legend", dummy_id,
+                1000u64,
                 test_scenario::ctx(scenario)
             );
             test_scenario::return_to_sender(scenario, admin_cap);
+            test_scenario::return_shared(config);
         };
         
-        // 3. User buys pet
+        // User buys pet (with refund)
         test_scenario::next_tx(scenario, user);
         {
             let config = test_scenario::take_shared<GlobalConfig>(scenario);
             let template = test_scenario::take_shared<PetTemplate>(scenario);
             let random_state = test_scenario::take_shared<random::Random>(scenario);
             let clock = clock::create_for_testing(test_scenario::ctx(scenario));
-            let payment = coin::mint_for_testing<SUI>(1000, test_scenario::ctx(scenario));
+            let mut payment = coin::mint_for_testing<SUI>(5000, test_scenario::ctx(scenario));
             
-            pet_nft::buy_pet(
-                &config,
-                &template,
-                payment,
-                &clock,
-                &random_state,
-                test_scenario::ctx(scenario)
-            );
+            pet_nft::buy_pet(&config, &template, &mut payment, &clock, &random_state, test_scenario::ctx(scenario));
+            
+            // Verify refund: paid 5000, price 1000 -> remaining 4000
+            assert!(coin::value(&payment) == 4000, 0);
             
             clock::destroy_for_testing(clock);
+            test_utils::destroy(payment);
             test_scenario::return_shared(config);
             test_scenario::return_shared(template);
             test_scenario::return_shared(random_state);
         };
         
-        // 4. Verify pet and perfection score
+        // Verify pet created
         test_scenario::next_tx(scenario, user);
         {
             let pet = test_scenario::take_from_sender<PetNFT>(scenario);

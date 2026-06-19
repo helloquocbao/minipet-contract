@@ -1,4 +1,4 @@
-#[allow(lint(public_entry))]
+#[allow(lint(public_entry), duplicate_alias, unused_use, unused_const, unused_field, lint(public_random), deprecated_usage)]
 module pet_nft::pet_nft {
     use std::string::{Self, String};
     use std::vector;
@@ -25,9 +25,11 @@ module pet_nft::pet_nft {
         custom_mint_limit: u64,
         custom_mint_count: u64,
         base_slot_fee: u64,     // Phí cố định cho 1 slot
+        rename_fee: u64,        // Phí đổi tên Pet
         treasury_address: address, // Địa chỉ nhận phí tập trung
         templates: vector<ID>, // Danh sách các ID của PetTemplate
     }
+
 
     /// Vật phẩm cho phép đúc Pet (Cần mua trước khi mint)
     public struct MintSlot has key, store {
@@ -46,20 +48,30 @@ module pet_nft::pet_nft {
         sprite_blob_id: ID,  // Sui Object ID of the storage reservation
         slug: String,
         level: u64,
+        experience: u64,
         happiness: u64,
         born_at: u64,
         perfection_score: u64,
         is_custom: bool,      
+        rarity: String,
     }
 
     /// Template cho các loại Pet tiêu chuẩn (Cửa hàng)
     public struct PetTemplate has key, store {
         id: UID,
         name: String,
+        pet_type: String,        // Trade style (e.g. "aggressive", "conservative", "balanced")
+        description: String,     // Pet description
         image_url: String,
         image_blob_id: ID,
-        sprite_url: String,
-        sprite_blob_id: ID,
+        sprite_url_normal: String,
+        sprite_blob_id_normal: ID,
+        sprite_url_rare: String,
+        sprite_blob_id_rare: ID,
+        sprite_url_super_rare: String,
+        sprite_blob_id_super_rare: ID,
+        sprite_url_legendary: String,
+        sprite_blob_id_legendary: ID,
         price: u64,
     }
 
@@ -96,9 +108,11 @@ module pet_nft::pet_nft {
             custom_mint_limit: 10, 
             custom_mint_count: 0,
             base_slot_fee: 10000 * 1000000000,   // 10,000 MIPET cố định
+            rename_fee: 50 * 1000000000,         // 50 MIPET mặc định để đổi tên
             treasury_address: tx_context::sender(ctx), // Mặc định là người deploy
             templates: vector::empty<ID>(),
         };
+
         
         let admin_cap = AdminCap { id: object::new(ctx) };
         transfer::public_transfer(publisher, tx_context::sender(ctx));
@@ -129,6 +143,12 @@ module pet_nft::pet_nft {
     public fun increase_mint_limit(_: &AdminCap, config: &mut GlobalConfig, amount: u64) {
         config.custom_mint_limit = config.custom_mint_limit + amount;
     }
+
+    /// Admin điều chỉnh phí đổi tên
+    public fun update_rename_fee(_: &AdminCap, config: &mut GlobalConfig, new_fee: u64) {
+        config.rename_fee = new_fee;
+    }
+
 
     /// MUA SLOT ĐÚC (Giá cố định)
     public entry fun buy_mint_slot(
@@ -178,10 +198,12 @@ module pet_nft::pet_nft {
             sprite_blob_id,
             slug: string::utf8(slug),
             level: 1,
+            experience: 0,
             happiness: 100,
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection,
             is_custom: true,
+            rarity: string::utf8(b"Custom"),
         };
         transfer::public_transfer(pet, tx_context::sender(ctx));
     }
@@ -191,20 +213,36 @@ module pet_nft::pet_nft {
         _: &AdminCap,
         config: &mut GlobalConfig,
         name: vector<u8>,
+        pet_type: vector<u8>,
+        description: vector<u8>,
         img: vector<u8>,
         img_blob: ID,
-        sprite: vector<u8>,
-        sprite_blob: ID,
+        sprite_normal: vector<u8>,
+        sprite_blob_normal: ID,
+        sprite_rare: vector<u8>,
+        sprite_blob_rare: ID,
+        sprite_super_rare: vector<u8>,
+        sprite_blob_super_rare: ID,
+        sprite_legendary: vector<u8>,
+        sprite_blob_legendary: ID,
         price: u64,
         ctx: &mut TxContext
     ) {
         let template = PetTemplate {
             id: object::new(ctx),
             name: string::utf8(name),
+            pet_type: string::utf8(pet_type),
+            description: string::utf8(description),
             image_url: string::utf8(img),
             image_blob_id: img_blob,
-            sprite_url: string::utf8(sprite),
-            sprite_blob_id: sprite_blob,
+            sprite_url_normal: string::utf8(sprite_normal),
+            sprite_blob_id_normal: sprite_blob_normal,
+            sprite_url_rare: string::utf8(sprite_rare),
+            sprite_blob_id_rare: sprite_blob_rare,
+            sprite_url_super_rare: string::utf8(sprite_super_rare),
+            sprite_blob_id_super_rare: sprite_blob_super_rare,
+            sprite_url_legendary: string::utf8(sprite_legendary),
+            sprite_blob_id_legendary: sprite_blob_legendary,
             price,
         };
         let template_id = object::id(&template);
@@ -216,29 +254,48 @@ module pet_nft::pet_nft {
     public entry fun buy_pet(
         config: &GlobalConfig,
         template: &PetTemplate, 
-        payment: Coin<SUI>, 
+        payment: &mut Coin<SUI>, 
         clock: &Clock, 
         random: &Random,
         ctx: &mut TxContext
     ) {
-        assert!(coin::value(&payment) >= template.price, EInsufficientFunds);
+        assert!(coin::value(payment) >= template.price, EInsufficientFunds);
+        
+        let pay_coin = coin::split(payment, template.price, ctx);
         
         let perfection = roll_perfection_v2(random, ctx);
+        
+        // Secure Randomness roll to determine rarity appearance
+        let mut gen = random::new_generator(random, ctx);
+        let roll = random::generate_u64_in_range(&mut gen, 0, 10000);
+        
+        let (sprite_url, sprite_blob_id, rarity) = if (roll < 7000) {
+            (template.sprite_url_normal, template.sprite_blob_id_normal, string::utf8(b"Normal"))
+        } else if (roll < 9000) {
+            (template.sprite_url_rare, template.sprite_blob_id_rare, string::utf8(b"Rare"))
+        } else if (roll < 9800) {
+            (template.sprite_url_super_rare, template.sprite_blob_id_super_rare, string::utf8(b"Super Rare"))
+        } else {
+            (template.sprite_url_legendary, template.sprite_blob_id_legendary, string::utf8(b"Legendary"))
+        };
+
         let pet = PetNFT {
             id: object::new(ctx), 
             name: template.name, 
             image_url: template.image_url, 
             image_blob_id: template.image_blob_id,
-            sprite_url: template.sprite_url,
-            sprite_blob_id: template.sprite_blob_id,
+            sprite_url,
+            sprite_blob_id,
             slug: template.name, 
             level: 1, 
+            experience: 0,
             happiness: 100, 
             born_at: clock::timestamp_ms(clock),
             perfection_score: perfection, 
             is_custom: false,
+            rarity,
         };
-        transfer::public_transfer(payment, config.treasury_address);
+        transfer::public_transfer(pay_coin, config.treasury_address);
         transfer::public_transfer(pet, tx_context::sender(ctx));
     }
 
@@ -262,8 +319,35 @@ module pet_nft::pet_nft {
     }
 
     public fun perfection_score(pet: &PetNFT): u64 { pet.perfection_score }
-    public fun level_up(pet: &mut PetNFT) { pet.level = pet.level + 1; }
+    public fun level(pet: &PetNFT): u64 { pet.level }
+    public fun rarity(pet: &PetNFT): String { pet.rarity }
+    public fun experience(pet: &PetNFT): u64 { pet.experience }
+    public fun happiness(pet: &PetNFT): u64 { pet.happiness }
+    public fun born_at(pet: &PetNFT): u64 { pet.born_at }
+    
+    /// Users share their current mood with the pet.
+    /// The amount corresponds to the user's selected mood (e.g., happy = high, sad = low).
     public fun update_happiness(pet: &mut PetNFT, amount: u64) { assert!(amount <= 100, EMaxHappiness); pet.happiness = amount; }
+
+    /// Rename the pet by paying the rename fee in PET_TOKEN.
+    public entry fun rename_pet(
+        config: &GlobalConfig,
+        pet: &mut PetNFT,
+        payment: &mut Coin<PET_TOKEN>,
+        new_name: vector<u8>,
+        ctx: &mut TxContext
+    ) {
+        let fee = config.rename_fee;
+        assert!(coin::value(payment) >= fee, EInsufficientFunds);
+        
+        let fee_coin = coin::split(payment, fee, ctx);
+        transfer::public_transfer(fee_coin, config.treasury_address);
+        
+        pet.name = string::utf8(new_name);
+    }
+
+
+
     public fun burn(pet: PetNFT) {
         let PetNFT { 
             id, 
@@ -274,28 +358,62 @@ module pet_nft::pet_nft {
             sprite_blob_id: _, 
             slug: _, 
             level: _, 
+            experience: _,
             happiness: _, 
             born_at: _, 
             perfection_score: _, 
-            is_custom: _ 
+            is_custom: _,
+            rarity: _ 
         } = pet;
         object::delete(id);
     }
     
-    public entry fun send_message(pet: &PetNFT, payment: Coin<SUI>, recipient: address, message: vector<u8>, ctx: &mut TxContext) {
-        let amount = coin::value(&payment); transfer::public_transfer(payment, recipient);
+    public entry fun send_message(config: &GlobalConfig, pet: &mut PetNFT, payment: &mut Coin<SUI>, amount: u64, recipient: address, message: vector<u8>, ctx: &mut TxContext) {
+        assert!(coin::value(payment) >= amount, EInsufficientFunds);
+        
+        let fee_amount = amount / 100; // 1% fee
+        let send_amount = amount - fee_amount;
+        
+        if (fee_amount > 0) {
+            let fee_coin = coin::split(payment, fee_amount, ctx);
+            transfer::public_transfer(fee_coin, config.treasury_address);
+        };
+        
+        let sent_coin = coin::split(payment, send_amount, ctx);
+        transfer::public_transfer(sent_coin, recipient);
+        
+        // Tính kinh nghiệm: 1 SUI (10^9 MIST) = 100 EXP -> 1 EXP = 10,000,000 MIST (0.01 SUI).
+        let exp_gained = amount / 10000000;
+        if (exp_gained > 0) {
+            pet.experience = pet.experience + exp_gained;
+            while (pet.experience >= pet.level * 100) {
+                pet.experience = pet.experience - pet.level * 100;
+                pet.level = pet.level + 1;
+            };
+        };
+
         event::emit(MessageEvent { sender: tx_context::sender(ctx), recipient, amount, message: string::utf8(message), pet_slug: pet.name, pet_image: pet.image_url });
     }
     public entry fun bonk_pet(
         config: &GlobalConfig,
-        my_pet: &PetNFT, 
+        my_pet: &mut PetNFT, 
         payment: &mut Coin<PET_TOKEN>, 
         target: address, 
         ctx: &mut TxContext
     ) {
-        let fee = 100 * 1000000000; 
+        let fee = 100 * 1000000000;
+        assert!(coin::value(payment) >= fee, EInsufficientFunds);
         let fee_coin = coin::split(payment, fee, ctx); 
         transfer::public_transfer(fee_coin, config.treasury_address);
+        
+        // Gõ đầu nhận cố định 50 EXP
+        let exp_gained = 50;
+        my_pet.experience = my_pet.experience + exp_gained;
+        while (my_pet.experience >= my_pet.level * 100) {
+            my_pet.experience = my_pet.experience - my_pet.level * 100;
+            my_pet.level = my_pet.level + 1;
+        };
+
         event::emit(BonkEvent { bonker: tx_context::sender(ctx), target, fee, pet_slug: my_pet.name, pet_image: my_pet.image_url });
     }
 
