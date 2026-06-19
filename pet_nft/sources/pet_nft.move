@@ -60,6 +60,8 @@ module pet_nft::pet_nft {
     public struct PetTemplate has key, store {
         id: UID,
         name: String,
+        pet_type: String,        // Trade style (e.g. "aggressive", "conservative", "balanced")
+        description: String,     // Pet description
         image_url: String,
         image_blob_id: ID,
         sprite_url_normal: String,
@@ -211,6 +213,8 @@ module pet_nft::pet_nft {
         _: &AdminCap,
         config: &mut GlobalConfig,
         name: vector<u8>,
+        pet_type: vector<u8>,
+        description: vector<u8>,
         img: vector<u8>,
         img_blob: ID,
         sprite_normal: vector<u8>,
@@ -227,6 +231,8 @@ module pet_nft::pet_nft {
         let template = PetTemplate {
             id: object::new(ctx),
             name: string::utf8(name),
+            pet_type: string::utf8(pet_type),
+            description: string::utf8(description),
             image_url: string::utf8(img),
             image_blob_id: img_blob,
             sprite_url_normal: string::utf8(sprite_normal),
