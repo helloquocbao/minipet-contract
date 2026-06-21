@@ -1,64 +1,62 @@
 #[test_only]
+#[allow(deprecated_usage)]
 module pet_token::pet_token_tests {
     use sui::test_scenario;
-    use sui::coin::{Self, TreasuryCap};
+    use sui::coin;
     use pet_token::pet_token::{Self, PET_TOKEN, FaucetConfig};
 
     const ADMIN: address = @0xAD;
     const USER: address = @0x123;
 
     #[test]
-    fun test_mint_and_burn() {
+    fun test_init_creates_faucet_config() {
         let mut scenario = test_scenario::begin(ADMIN);
         pet_token::test_init(test_scenario::ctx(&mut scenario));
-        
+
         test_scenario::next_tx(&mut scenario, ADMIN);
         {
-            let mut treasury = test_scenario::take_from_sender<TreasuryCap<PET_TOKEN>>(&scenario);
-            pet_token::mint(&mut treasury, 1000 * 1000000000, USER, test_scenario::ctx(&mut scenario));
-            test_scenario::return_to_sender(&scenario, treasury);
+            // FaucetConfig should be shared
+            let faucet = test_scenario::take_shared<FaucetConfig>(&scenario);
+            test_scenario::return_shared(faucet);
         };
-        
-        test_scenario::next_tx(&mut scenario, USER);
+
+        // Admin should receive 250M tokens
+        test_scenario::next_tx(&mut scenario, ADMIN);
         {
             let coin = test_scenario::take_from_sender<coin::Coin<PET_TOKEN>>(&scenario);
-            assert!(coin::value(&coin) == 1000 * 1000000000, 0);
-            
-            // Test burn
-            test_scenario::next_tx(&mut scenario, ADMIN);
-            let mut treasury = test_scenario::take_from_address<TreasuryCap<PET_TOKEN>>(&scenario, ADMIN);
-            pet_token::burn(&mut treasury, coin);
-            test_scenario::return_to_address(ADMIN, treasury);
+            assert!(coin::value(&coin) == 250_000_000 * 1_000_000_000, 0);
+            test_scenario::return_to_sender(&scenario, coin);
         };
-        
+
         test_scenario::end(scenario);
     }
 
     #[test]
-    fun test_claim_token_faucet() {
+    fun test_treasury_sent_to_dead_address() {
         let mut scenario = test_scenario::begin(ADMIN);
         pet_token::test_init(test_scenario::ctx(&mut scenario));
-        
-        // User claims token from faucet
-        test_scenario::next_tx(&mut scenario, USER);
+
+        // TreasuryCap should be at dead address (0x0), not admin
+        test_scenario::next_tx(&mut scenario, ADMIN);
         {
-            let mut treasury = test_scenario::take_from_address<TreasuryCap<PET_TOKEN>>(&scenario, ADMIN);
-            let faucet = test_scenario::take_shared<FaucetConfig>(&scenario);
-            
-            pet_token::claim_token(&mut treasury, &faucet, test_scenario::ctx(&mut scenario));
-            
-            test_scenario::return_shared(faucet);
-            test_scenario::return_to_address(ADMIN, treasury);
+            assert!(!test_scenario::has_most_recent_for_sender<coin::TreasuryCap<PET_TOKEN>>(&scenario), 0);
         };
-        
-        // Verify user received 10001 MIPET
-        test_scenario::next_tx(&mut scenario, USER);
+
+        test_scenario::end(scenario);
+    }
+
+    #[test]
+    fun test_burn_tokens_sent_to_dead_address() {
+        let mut scenario = test_scenario::begin(ADMIN);
+        pet_token::test_init(test_scenario::ctx(&mut scenario));
+
+        // Dead address (0x0) should receive 250M burned tokens
+        test_scenario::next_tx(&mut scenario, @0x0);
         {
-            let coin = test_scenario::take_from_sender<coin::Coin<PET_TOKEN>>(&scenario);
-            assert!(coin::value(&coin) == 10001 * 1000000000, 0);
-            test_scenario::return_to_sender(&scenario, coin);
+            // Dead address gets TreasuryCap + 250M burn coins
+            assert!(test_scenario::has_most_recent_for_sender<coin::Coin<PET_TOKEN>>(&scenario), 0);
         };
-        
+
         test_scenario::end(scenario);
     }
 }
